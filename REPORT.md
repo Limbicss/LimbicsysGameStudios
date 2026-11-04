@@ -1,6 +1,6 @@
 # REPORT - Port of the studio system to Codex and Antigravity (WO_CODEX_UNITY_GAME_STUDIO)
 
-Branch `port/codex-agy` -> PR to `main` (not merged; C- reviews). Per-task reports: `reports/T1.md` ... `T5.md`. Mapping + doc links: `port/MAPPING.md`.
+Branch `port/codex-agy` -> PR https://github.com/Limbicss/LimbicsysGameStudios/pull/1 to `main` (open, not merged; C- reviews). Per-task reports: `reports/T1.md` ... `T5.md`. Mapping + doc links: `port/MAPPING.md`.
 
 ## What was ported (verified by `python3 port/convert.py --check` and `bash tests/hooks_test.sh`)
 | Original (`.claude/`, untouched) | Codex | AGY |
