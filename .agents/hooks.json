@@ -1,0 +1,17 @@
+{
+  "studio-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./hooks/adapters/agy-pre-tool-use.sh",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

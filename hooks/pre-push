@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# pre-push: replaces the Claude "validate-push" hook. Blocks forced pushes (non-fast-forward),
+# remote deletions, and direct pushes to main/master. Override main only with PORT_ALLOW_PROTECTED_PUSH=1
+# (that is the owner's approval gate, not the agent's).
+ZERO="0000000000000000000000000000000000000000"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_ref" ] && continue
+  if [ "$local_sha" = "$ZERO" ]; then
+    echo "pre-push BLOCKED: deleting remote ref $remote_ref needs the owner's approval." >&2; exit 1
+  fi
+  if [ "$remote_sha" != "$ZERO" ] && ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo "pre-push BLOCKED: non-fast-forward (forced) push to $remote_ref. Needs the owner's approval." >&2; exit 1
+  fi
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      if [ "${PORT_ALLOW_PROTECTED_PUSH:-}" != "1" ]; then
+        echo "pre-push BLOCKED: direct push to ${remote_ref#refs/heads/}. Use a branch + PR (owner merges)." >&2; exit 1
+      fi ;;
+  esac
+done
+exit 0

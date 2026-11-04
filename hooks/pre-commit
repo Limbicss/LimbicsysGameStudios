@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# pre-commit: replaces the Claude PreToolUse "validate-commit" hook for any tool (Codex, AGY, plain git).
+# 1) refuses staged secrets  2) refuses obvious tokens in added lines
+# 3) runs the original .claude/hooks/validate-commit.sh data check (invalid JSON in data files blocks)
+ROOT="$(git rev-parse --show-toplevel)"; cd "$ROOT" || exit 1
+FAIL=0
+while IFS= read -r f; do
+  case "$f" in
+    *.env.example|*.env.sample|*.env.template) continue ;;
+    .env|.env.*|*/.env|*/.env.*|*.pem|*.key|*.p12|*.pfx|*.keystore|*/id_rsa|id_rsa|*/id_ed25519|id_ed25519)
+      echo "pre-commit BLOCKED: secret-like file staged: $f" >&2; FAIL=1 ;;
+  esac
+done <<EOT
+$(git diff --cached --name-only --diff-filter=ACMR)
+EOT
+if git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+' | grep -Eq 'AKIA[0-9A-Z]{16}|-----BEGIN ([A-Z]+ )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{36}|sk-[A-Za-z0-9_-]{32,}'; then
+  echo "pre-commit BLOCKED: an added line looks like a key or token." >&2; FAIL=1
+fi
+[ "$FAIL" = 1 ] && exit 1
+if [ -f .claude/hooks/validate-commit.sh ]; then
+  ERR="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' | bash .claude/hooks/validate-commit.sh 2>&1 >/dev/null)"; RC=$?
+  if [ "$RC" = "2" ]; then echo "pre-commit BLOCKED:" >&2; echo "$ERR" >&2; exit 1; fi
+fi
+exit 0
