@@ -51,29 +51,129 @@ expect_fail "FORCE push blocked (non-fast-forward)" git push -f origin feature/t
 expect_fail "push to main blocked without owner override" git push origin feature/test:main
 expect_fail "remote branch delete blocked" git push origin --delete feature/test
 
+BASH_BIN="$(command -v bash)"
+HOOK_PATH=""
+run_adapter() {
+  if [ -n "$HOOK_PATH" ]; then PATH="$HOOK_PATH" "$BASH_BIN" "$@"; else "$BASH_BIN" "$@"; fi
+}
+json_quote() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/'; }
+
+# PATH for the adapters only. Excludes named binaries (jq, python) so fallbacks are real.
+build_path_excluding() {
+  local dest="$1"; shift
+  local exclude=" $* "
+  mkdir -p "$dest"
+  local d p n
+  while IFS= read -r d; do
+    [ -n "$d" ] && [ -d "$d" ] || continue
+    for p in "$d"/*; do
+      [ -e "$p" ] || continue
+      n="$(basename "$p")"
+      case "$exclude" in *" $n "*) continue ;; esac
+      [ -e "$dest/$n" ] && continue
+      ln -s "$p" "$dest/$n" 2>/dev/null || true
+    done
+  done <<EOF
+$(printf '%s' "$PATH" | tr ':' '\n')
+EOF
+}
+
 echo "== Codex tool hook (.codex/hooks.json adapter)"
-CX="bash hooks/adapters/codex-pre-tool-use.sh"
-cx() { printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/')" | $CX; }
+cx() { printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(json_quote "$1")" | run_adapter hooks/adapters/codex-pre-tool-use.sh; }
 expect_fail "codex: git push --force denied (exit 2)" cx "git push --force origin main"
+expect_fail "codex: git push -f denied" cx "git push -f origin main"
 expect_fail "codex: git push origin x -f (flag after args) denied" cx "git push origin x -f"
+expect_fail "codex: git push --force-with-lease denied" cx "git push --force-with-lease origin main"
 expect_fail "codex: reading .env denied" cx "cat .env"
+expect_fail "codex: .env beside .env.example still denied" cx "cat .env .env.example"
+expect_fail "codex: .env.example beside .env still denied" cx "cat .env.example .env"
+expect_fail "codex: .env.example2 is not a template" cx "cat .env.example2"
 expect_fail "codex: rm -rf denied" cx "rm -rf build"
+expect_fail "codex: rm -fr denied" cx "rm -fr /tmp/build"
+expect_fail "codex: rm -r -f denied" cx "rm -r -f build"
 expect_fail "codex: --no-verify denied" cx "git commit --no-verify -m x"
 expect_ok   "codex: harmless command allowed" cx "ls -la"
 expect_ok   "codex: .env.example allowed" cx "cat .env.example"
+expect_ok   "codex: .env.sample allowed" cx "cat .env.sample"
 expect_ok   "codex: normal push allowed" cx "git push origin feature/x"
 # exit code must be 2 (documented block code)
 cx "git push --force" >/dev/null 2>&1; RC=$?; [ "$RC" = "2" ] && ok "codex block exit code is 2" || bad "codex exit code $RC"
-printf '{"tool_name":"apply_patch","tool_input":{"command":"*** Update File: .env\\n"}}' | $CX >/dev/null 2>&1; RC=$?
+printf '{"tool_name":"apply_patch","tool_input":{"command":"*** Update File: .env\\n"}}' | run_adapter hooks/adapters/codex-pre-tool-use.sh >/dev/null 2>&1; RC=$?
 [ "$RC" = "2" ] && ok "codex: apply_patch on .env denied" || bad "codex apply_patch .env rc=$RC"
+printf 'this is not json' | run_adapter hooks/adapters/codex-pre-tool-use.sh >/dev/null 2>&1; RC=$?
+[ "$RC" = "2" ] && ok "codex: unparseable payload blocked" || bad "codex unparseable rc=$RC"
 
 echo "== AGY tool hook (.agents/hooks.json adapter)"
-AG="bash hooks/adapters/agy-pre-tool-use.sh"
-ag() { printf '{"toolCall":{"name":"%s","args":{"CommandLine":"%s"}}}' "$1" "$2" | $AG; }
-ag run_command "git push --force origin main" | grep -q '"decision":"deny"' && ok "agy: force push -> deny JSON" || bad "agy force push"
-ag run_command "type .env" | grep -q '"decision":"deny"' && ok "agy: reading .env -> deny JSON" || bad "agy .env"
-printf '{"toolCall":{"name":"view_file","args":{"AbsolutePath":"/w/.env"}}}' | $AG | grep -q '"decision":"deny"' && ok "agy: view_file .env -> deny JSON" || bad "agy view_file .env"
+ag() { printf '{"toolCall":{"name":"%s","args":{"CommandLine":"%s"}}}' "$1" "$2" | run_adapter hooks/adapters/agy-pre-tool-use.sh; }
+ag_deny() {
+  local name="$1" cmd="$2"
+  if ag run_command "$cmd" | grep -q '"decision":"deny"'; then ok "agy: $name"; else bad "agy: $name"; fi
+}
+ag_deny "force push -> deny JSON" "git push --force origin main"
+ag_deny "git push -f -> deny JSON" "git push -f"
+ag_deny "git push origin x -f -> deny JSON" "git push origin x -f"
+ag_deny "--force-with-lease -> deny JSON" "git push --force-with-lease"
+ag_deny "reading .env -> deny JSON" "type .env"
+ag_deny ".env beside .env.example -> deny JSON" "cat .env .env.example"
+ag_deny ".env.example2 is not a template" "cat .env.example2"
+ag_deny "rm -rf -> deny JSON" "rm -rf build"
+ag_deny "rm -fr -> deny JSON" "rm -fr build"
+ag_deny "--no-verify -> deny JSON" "git commit --no-verify -m x"
+printf '{"toolCall":{"name":"view_file","args":{"AbsolutePath":"/w/.env"}}}' | run_adapter hooks/adapters/agy-pre-tool-use.sh | grep -q '"decision":"deny"' && ok "agy: view_file .env -> deny JSON" || bad "agy view_file .env"
 ag run_command "ls" | grep -q '"decision"' && bad "agy: ls wrongly denied" || ok "agy: harmless command allowed"
+ag run_command "cat .env.example" | grep -q '"decision"' && bad "agy: .env.example wrongly denied" || ok "agy: .env.example allowed"
+printf 'this is not json' | run_adapter hooks/adapters/agy-pre-tool-use.sh | grep -q '"decision":"deny"' && ok "agy: unparseable payload denied" || bad "agy unparseable"
+
+run_hidden_parser_cases() {
+  local tag="$1"
+  expect_fail "$tag codex: git push --force denied" cx "git push --force origin main"
+  expect_fail "$tag codex: git push -f denied" cx "git push -f"
+  expect_fail "$tag codex: git push origin x -f denied" cx "git push origin x -f"
+  expect_fail "$tag codex: --force-with-lease denied" cx "git push --force-with-lease"
+  expect_fail "$tag codex: rm -rf denied" cx "rm -rf build"
+  expect_fail "$tag codex: rm -fr denied" cx "rm -fr build"
+  expect_fail "$tag codex: --no-verify denied" cx "git push --no-verify"
+  expect_fail "$tag codex: reading .env denied" cx "cat .env"
+  expect_fail "$tag codex: .env beside template denied" cx "cat .env .env.example"
+  expect_ok   "$tag codex: harmless command allowed" cx "ls -la"
+  expect_ok   "$tag codex: .env.example allowed" cx "cat .env.example"
+  cx "git push --force" >/dev/null 2>&1; RC=$?
+  [ "$RC" = "2" ] && ok "$tag codex block exit code is 2" || bad "$tag codex exit code $RC"
+  ag_deny "$tag force push -> deny JSON" "git push --force origin main"
+  ag_deny "$tag git push -f -> deny JSON" "git push -f"
+  ag_deny "$tag flag-after-args -> deny JSON" "git push origin x -f"
+  ag_deny "$tag rm -rf -> deny JSON" "rm -rf build"
+  ag_deny "$tag rm -fr -> deny JSON" "rm -fr /var/tmp/build"
+  ag_deny "$tag --no-verify -> deny JSON" "git commit --no-verify -m x"
+  ag run_command "ls" | grep -q '"decision"' && bad "$tag agy: ls wrongly denied" || ok "$tag agy: harmless command allowed"
+  printf 'this is not json' | run_adapter hooks/adapters/codex-pre-tool-use.sh >/dev/null 2>&1; RC=$?
+  [ "$RC" = "2" ] && ok "$tag codex: unparseable payload blocked" || bad "$tag codex unparseable rc=$RC"
+  printf 'this is not json' | run_adapter hooks/adapters/agy-pre-tool-use.sh | grep -q '"decision":"deny"' && ok "$tag agy: unparseable payload denied" || bad "$tag agy unparseable"
+}
+
+echo "== tool hooks with jq hidden"
+NOJQ="$TMP/path-nojq"
+build_path_excluding "$NOJQ" jq
+if PATH="$NOJQ" command -v jq >/dev/null 2>&1; then
+  bad "jq still visible after hiding"
+else
+  ok "jq hidden from adapter PATH"
+fi
+HOOK_PATH="$NOJQ"
+run_hidden_parser_cases "nojq"
+HOOK_PATH=""
+
+echo "== tool hooks with jq and python hidden"
+SEDONLY="$TMP/path-sedonly"
+build_path_excluding "$SEDONLY" jq python python3
+if PATH="$SEDONLY" command -v jq >/dev/null 2>&1 || PATH="$SEDONLY" command -v python3 >/dev/null 2>&1 || PATH="$SEDONLY" command -v python >/dev/null 2>&1; then
+  bad "jq or python still visible in sed-only PATH"
+else
+  ok "jq and python hidden from adapter PATH"
+fi
+HOOK_PATH="$SEDONLY"
+run_hidden_parser_cases "sedonly"
+HOOK_PATH=""
 
 echo "== Codex execpolicy rules (needs the codex binary)"
 if command -v codex >/dev/null 2>&1; then

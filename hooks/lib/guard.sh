@@ -13,15 +13,31 @@ guard__segments() {
 }
 
 guard_check_env_text() {
-  local text="$1"
-  # a .env path token: preceded by start/space/slash/quote/=, optional .suffix, followed by a delimiter
-  if printf '%s' "$text" | grep -Eq '(^|[[:space:]/"'"'"'=\\])\.env(\.[A-Za-z0-9_-]+)?([[:space:]"'"'"';|&)\\,]|$)'; then
-    if ! printf '%s' "$text" | grep -Eq '\.env\.(example|sample|template)'; then
-      echo "Blocked: touching a .env file (secrets). Ask the owner; use .env.example for templates."
-      return 1
-    fi
-  fi
-  return 0
+  local text="$1" word base flat delim noglob=0 rc=0
+  # Judge each path on its own. A template name in the same command must not
+  # exempt a real .env, and only the exact names .env.example / .sample / .template
+  # are templates (.env.example2 is not).
+  case $- in
+    *f*) ;;
+    *) set -f; noglob=1 ;;
+  esac
+  flat="$text"
+  for delim in ' ' $'\t' $'\n' $'\r' '"' "'" ';' '|' '&' '<' '>' '\' '=' '(' ')' '`' ',' ':' '*' '?' '[' ']' '{' '}'; do
+    flat="${flat//"$delim"/ }"
+  done
+  for word in $flat; do
+    base="${word##*/}"
+    case "$base" in
+      .env.example|.env.sample|.env.template) ;;
+      .env|.env.*)
+        echo "Blocked: touching a .env file (secrets). Ask the owner; use .env.example for templates."
+        rc=1
+        break
+        ;;
+    esac
+  done
+  [ "$noglob" = 1 ] && set +f
+  return "$rc"
 }
 
 guard_check_command() {

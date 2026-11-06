@@ -5,14 +5,16 @@
 # Reuses hooks/lib/guard.sh and the original .claude/hooks/validate-commit.sh / validate-push.sh.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/hooks/lib/guard.sh"
+. "$ROOT/hooks/lib/payload.sh"
 PAYLOAD="$(cat)"
 
-TOOL=""; TEXT="$PAYLOAD"
-if command -v jq >/dev/null 2>&1; then
-  TOOL="$(printf '%s' "$PAYLOAD" | jq -r '.tool_name // empty' 2>/dev/null)"
-  TEXT="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input | if type=="string" then . else (.command // .cmd // tojson) end' 2>/dev/null)"
-  [ -z "$TEXT" ] && TEXT="$PAYLOAD"
+# jq, then python, then a string scan. If none can parse, refuse the command.
+if ! payload_decode codex "$PAYLOAD"; then
+  echo "Blocked: could not parse the tool payload, so the command was refused." >&2
+  exit 2
 fi
+TOOL="$PAYLOAD_TOOL"
+TEXT="$PAYLOAD_TEXT"
 
 case "$TOOL" in
   Bash|exec_command|shell|"")
