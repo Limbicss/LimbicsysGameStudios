@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# commit-msg: Conventional Commits (feat|fix|chore|docs|test|refactor ...) per .claude/docs/coding-standards.md.
+MSG_FILE="$1"
+FIRST="$(grep -v '^#' "$MSG_FILE" | sed -n '/./{p;q;}')"
+case "$FIRST" in Merge\ *|Revert\ *|fixup!*|squash!*) exit 0 ;; esac
+if ! printf '%s' "$FIRST" | grep -Eq '^(feat|fix|chore|docs|test|refactor|perf|style|build|ci|revert)(\([A-Za-z0-9._/-]+\))?!?: .+'; then
+  echo "commit-msg BLOCKED: use Conventional Commits, e.g. 'feat(port): add agent converter'. Got: '$FIRST'" >&2
+  exit 1
+fi
+if ! grep -Eqi '^(story|task|design|adr|gdd|refs?):' "$MSG_FILE"; then
+  echo "commit-msg note: no 'Story:/Task:/Design:' line - reference the design doc or task id when one exists." >&2
+fi
+exit 0

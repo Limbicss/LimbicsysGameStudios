@@ -1,0 +1,57 @@
+# Codex execution-policy rules (Starlark). Docs: https://learn.chatgpt.com/docs/agent-configuration/rules
+# Rules decide which commands may run outside the sandbox. They only match a command PREFIX, so the
+# flag-in-any-position checks live in hooks/lib/guard.sh (called by .codex/hooks.json).
+# Test:  codex execpolicy check --pretty --rules .codex/rules/studio.rules -- git push --force origin main
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease", "--delete"]],
+    decision = "forbidden",
+    justification = "Force push / remote delete needs the owner's explicit approval.",
+    match = ["git push --force origin main", "git push -f origin x"],
+    not_match = ["git push origin feature/x"],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "git reset --hard can destroy uncommitted work.",
+    match = ["git reset --hard HEAD~1"],
+    not_match = ["git reset --soft HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "clean", ["-f", "-fd", "-fdx", "-xdf", "--force"]],
+    decision = "forbidden",
+    justification = "git clean -f deletes untracked files.",
+    match = ["git clean -fd"],
+    not_match = ["git clean -n"],
+)
+
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr", "-Rf", "-fR", "-r"]],
+    decision = "forbidden",
+    justification = "Recursive delete needs the owner's explicit approval.",
+    match = ["rm -rf build"],
+    not_match = ["rm notes.txt"],
+)
+
+prefix_rule(
+    pattern = ["sudo"],
+    decision = "forbidden",
+    justification = "No privilege escalation.",
+    match = ["sudo apt install x"],
+)
+
+prefix_rule(
+    pattern = ["git", "commit", "--no-verify"],
+    decision = "forbidden",
+    justification = "--no-verify skips the safety hooks.",
+    match = ["git commit --no-verify -m x"],
+)
+
+prefix_rule(
+    pattern = ["git", "merge"],
+    decision = "prompt",
+    justification = "Merging needs the owner's approval.",
+    match = ["git merge main"],
+)
