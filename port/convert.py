@@ -106,7 +106,10 @@ def expand_braces(p):
 # ---------------------------------------------------------------- generators
 def write(path, content, produced):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="\n")
+    # Path.write_text(newline=...) arrived in Python 3.10. open(newline="\n")
+    # is the same contract back to 3.8: keep LF, do not translate to os.linesep.
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
     produced.add(path.resolve())
 
 def gen_skills(skills, produced):
