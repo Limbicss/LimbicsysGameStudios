@@ -1,0 +1,17 @@
+# OPTIONAL, UNTESTED (no Codex binary in the build environment). Copy these lines into
+# ~/.codex/config.toml (or .codex/config.toml) to deny file READS of .env files at the sandbox level.
+# Keys are from https://learn.chatgpt.com/docs/config-file/config-reference
+# (default_permissions, permissions.<name>.extends, permissions.<name>.filesystem.":workspace_roots").
+# Do not combine with sandbox_mode / [sandbox_workspace_write]. If Codex rejects it, delete it:
+# the active protection is the PreToolUse hook in .codex/hooks.json (tested in tests/hooks_test.sh).
+
+default_permissions = "studio-safe"
+
+[permissions.studio-safe]
+extends = ":workspace"
+description = "Workspace write; deny reading .env files"
+
+[permissions.studio-safe.filesystem.":workspace_roots"]
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+"**/*.env" = "deny"

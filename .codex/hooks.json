@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/hooks/adapters/codex-pre-tool-use.sh\"",
+            "timeout": 20,
+            "statusMessage": "Studio safety guard"
+          }
+        ]
+      }
+    ]
+  }
+}
